@@ -2,6 +2,8 @@
 
 Gary is a lightweight, interactive test platform built with LangGraph to explore agent-based workflows. It converts Java Swing forms into a YAML intermediate representation (IR) using an LLM (OpenAI), allows users to modify the IR through a command-line interface, and generates Python code using the NiceGUI library. Named playfully after SpongeBob's pet snail (and an internal image reference), Gary demonstrates LangGraph's interrupt-driven capabilities in a practical, extensible way.
 
+![Gary](img/gary_medium.png)
+
 ## Features  
 - Convert Java Swing code to YAML IR via OpenAI’s GPT-4o.  
 - Interactive CLI for visualizing and modifying the IR (add, change, delete elements).  

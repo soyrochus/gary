@@ -3,7 +3,7 @@ import os
 from typing import Dict, Any
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint import MemorySaver
+from langgraph.checkpoint.memory import InMemorySaver  # Updated import
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -20,7 +20,7 @@ class AgentState(Dict[str, Any]):
     user_command: str = ""
     error: str = ""
     output_dir: str = ""
-    waiting_for_input: bool = False  # Added to signal interrupt
+    waiting_for_input: bool = False
 
 # Initialize LLM with API key from .env
 api_key = os.getenv("OPENAI_API_KEY")
@@ -35,16 +35,16 @@ Convert this Java Swing code into a YAML IR with a 'form' key and 'elements' lis
 Java code:
 
 {java_code}
-                                            
+
 """)
 
 generate_prompt = PromptTemplate.from_template("""
 Convert this YAML IR into a Python script using NiceGUI. Define a `create_form()` function and call `ui.run()`. Return only the Python code string.
 
 YAML IR:
-                                               
+
 {yaml_ir}
-                                               
+
 """)
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -56,30 +56,27 @@ def call_llm(prompt, input_data):
 def convert_to_ir(state: AgentState) -> AgentState:
     try:
         yaml_ir = call_llm(parse_prompt, {"java_code": state["java_code"]})
-        yaml.safe_load(yaml_ir)
+        # Strip Markdown code block markers
+        yaml_ir = yaml_ir.strip()
+        if yaml_ir.startswith("```"):
+            yaml_ir = yaml_ir.split("\n", 1)[1].rsplit("\n", 1)[0]
+        yaml.safe_load(yaml_ir)  # Validate
         state["yaml_ir"] = yaml_ir
-        print("Parsed to YAML IR:\n", yaml_ir)
+        state["error"] = ""  # Clear error on success
     except (OutputParserException, yaml.YAMLError, Exception) as e:
         state["error"] = f"Failed to parse Java code: {str(e)}"
         print(state["error"])
     return state
 
 def user_interaction(state: AgentState) -> AgentState:
-    if state["error"]:
-        print("Error:", state["error"])
-        print("What would you like to do? (e.g., retry, exit)")
-    else:
-        print("\nCurrent IR:\n", state["yaml_ir"])
-        print("Options: 'visualize', 'add <type> <id> <value>', 'change <id> <key> <value>', 'delete <id>', 'generate', 'exit'")
-    state["waiting_for_input"] = True  # Signal interrupt
     return state
 
 def process_command(state: AgentState) -> AgentState:
     if not state["user_command"]:
-        return state  # No command yet, wait for input
+        return state
     
     command = state["user_command"].strip().lower()
-    state["waiting_for_input"] = False  # Reset interrupt flag
+    state["waiting_for_input"] = False
     
     if command == "exit":
         return {"exit": True}
@@ -96,7 +93,7 @@ def process_command(state: AgentState) -> AgentState:
 
     try:
         if command == "visualize":
-            print("Visualizing:\n", state["yaml_ir"])
+            pass  # IR already rendered in run_agent
         elif command.startswith("add"):
             _, type_, id_, value = command.split(maxsplit=3)
             new_elem = {"type": type_, "id": id_}
@@ -115,13 +112,13 @@ def process_command(state: AgentState) -> AgentState:
             ir["form"]["elements"] = [e for e in elements if e["id"] != id_]
         elif command == "generate":
             state["yaml_ir"] = yaml.dump(ir)
-            return generate_nicegui(state)
+            return state  # Let generate node handle it
         else:
             print("Unknown command.")
+        state["yaml_ir"] = yaml.dump(ir)
     except ValueError as e:
         print(f"Invalid command format: {e}")
     
-    state["yaml_ir"] = yaml.dump(ir)
     return state
 
 def generate_nicegui(state: AgentState) -> AgentState:
@@ -147,20 +144,17 @@ def build_graph():
     workflow.add_node("generate", generate_nicegui)
     workflow.set_entry_point("convert")
     workflow.add_edge("convert", "interact")
-    workflow.add_conditional_edges(
-        "interact",
-        lambda state: "process" if state["waiting_for_input"] else "interact",
-    )
+    workflow.add_edge("interact", "process")  # Always process after interact
     workflow.add_conditional_edges(
         "process",
         lambda state: (
-            END if state.get("exit", False) or state["user_command"] == "generate"
-            else "convert" if state["user_command"] == "retry" and state["error"]
-            else "interact"
+            "generate" if state["user_command"] == "generate"
+            else END if state.get("exit", False)
+            else "interact"  # Loop back for other commands
         ),
     )
     workflow.add_edge("generate", END)
-    return workflow.compile(checkpointer=MemorySaver())
+    return workflow.compile(checkpointer=InMemorySaver())
 
 def run_agent(java_code: str, output_dir: str):
     """Run the Gary agent with input Java code and output directory."""
@@ -168,19 +162,41 @@ def run_agent(java_code: str, output_dir: str):
     thread = {"configurable": {"thread_id": "gary_thread"}}
     graph = build_graph()
 
+    # Step 0 & 1: Parse Java and convert to IR
+    for event in graph.stream({"java_code": java_code}, thread):
+        if "convert" in event:
+            state = event["convert"]
+            break  # Stop after conversion
+
     while True:
-        events = graph.stream(state, thread)
-        for event in events:
-            if event.get("interact") and state["waiting_for_input"]:
-                user_input = input("Your command: ")
-                state["user_command"] = user_input
+        # Step 2: Render IR
+        if state["error"]:
+            print("Error:", state["error"])
+            break
+        print("\nCurrent IR:\n", state["yaml_ir"])
+
+        # Step 3: Present menu
+        print("Options: 'visualize', 'add <type> <id> <value>', 'change <id> <key> <value>', 'delete <id>', 'generate', 'exit'")
+
+        # Step 4: Wait for input
+        user_input = input("Your command: ")
+        state["user_command"] = user_input
+
+        # Step 5: Process input
+        for event in graph.stream(state, thread):
+            if "process" in event:
+                state = event["process"]
+                break  # Process once per command
+            elif "generate" in event:
+                state = event["generate"]
                 break
-        else:
-            break  # Exit if workflow completes
-        # Resume with user input
-        events = graph.stream(state, thread)
-        for event in events:
-            pass
-        state = graph.get_state(thread).values
+
+        # Step 5a or 5b: Check next action
+        if state["user_command"] == "generate":
+            break  # Step 6 handled by generate node
+        elif state.get("exit", False):
+            print("Exiting...")
+            break
+        # Otherwise, loop back to Step 2
 
     print("Gary completed.")
