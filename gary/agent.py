@@ -56,17 +56,15 @@ def call_llm(prompt, input_data):
 def convert_to_ir(state: AgentState) -> AgentState:
     try:
         yaml_ir = call_llm(parse_prompt, {"java_code": state["java_code"]})
-        # Strip Markdown code block markers
         yaml_ir = yaml_ir.strip()
         if yaml_ir.startswith("```"):
             yaml_ir = yaml_ir.split("\n", 1)[1].rsplit("\n", 1)[0]
-        yaml.safe_load(yaml_ir)  # Validate
+        yaml.safe_load(yaml_ir)
         state["yaml_ir"] = yaml_ir
-        state["error"] = ""  # Clear error on success
+        state["error"] = ""
     except (OutputParserException, yaml.YAMLError, Exception) as e:
         state["error"] = f"Failed to parse Java code: {str(e)}"
-        print(state["error"])
-    return state
+    return state  # Return full state
 
 def user_interaction(state: AgentState) -> AgentState:
     return state
@@ -79,7 +77,8 @@ def process_command(state: AgentState) -> AgentState:
     state["waiting_for_input"] = False
     
     if command == "exit":
-        return {"exit": True}
+        state["exit"] = True
+        return state
     if command == "retry" and state["error"]:
         state["error"] = ""
         return state
@@ -93,7 +92,7 @@ def process_command(state: AgentState) -> AgentState:
 
     try:
         if command == "visualize":
-            pass  # IR already rendered in run_agent
+            pass
         elif command.startswith("add"):
             _, type_, id_, value = command.split(maxsplit=3)
             new_elem = {"type": type_, "id": id_}
@@ -112,21 +111,36 @@ def process_command(state: AgentState) -> AgentState:
             ir["form"]["elements"] = [e for e in elements if e["id"] != id_]
         elif command == "generate":
             state["yaml_ir"] = yaml.dump(ir)
-            return state  # Let generate node handle it
+            return state
         else:
             print("Unknown command.")
         state["yaml_ir"] = yaml.dump(ir)
     except ValueError as e:
         print(f"Invalid command format: {e}")
     
-    return state
+    return state  # Return full state
 
 def generate_nicegui(state: AgentState) -> AgentState:
     try:
         python_code = call_llm(generate_prompt, {"yaml_ir": state["yaml_ir"]})
+        # Strip Markdown code block markers
+        python_code = python_code.strip()
+        if python_code.startswith("```"):
+            python_code = python_code.split("\n", 1)[1].rsplit("\n", 1)[0]  # Remove ```python and ```
+        
         if "ui.run()" not in python_code:
             raise ValueError("Generated code missing ui.run()")
-        output_path = os.path.join(state["output_dir"], "form.py")
+        
+        output_path = state["output_dir"]
+        print(f"DEBUG: Attempting to write to '{output_path}'")
+
+        if os.path.exists(output_path):
+            overwrite = input(f"File '{output_path}' already exists. Overwrite? (y/n): ").strip().lower()
+            if overwrite != "y":
+                print("Generation cancelled.")
+                state["error"] = "File generation cancelled by user."
+                return state
+
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(python_code)
         print(f"Generated NiceGUI code saved to: {output_path}")
@@ -134,6 +148,7 @@ def generate_nicegui(state: AgentState) -> AgentState:
     except Exception as e:
         state["error"] = f"Failed to generate NiceGUI code: {str(e)}"
         print(state["error"])
+        print(f"DEBUG: Exception type: {type(e).__name__}, message: {str(e)}")
     return state
 
 def build_graph():
@@ -156,17 +171,17 @@ def build_graph():
     workflow.add_edge("generate", END)
     return workflow.compile(checkpointer=InMemorySaver())
 
-def run_agent(java_code: str, output_dir: str):
-    """Run the Gary agent with input Java code and output directory."""
-    state = AgentState(java_code=java_code, output_dir=output_dir)
+def run_agent(java_code: str, output_file: str):
+    """Run the Gary agent with input Java code and output file."""
+    state = AgentState(java_code=java_code, output_dir=output_file)
     thread = {"configurable": {"thread_id": "gary_thread"}}
     graph = build_graph()
 
     # Step 0 & 1: Parse Java and convert to IR
-    for event in graph.stream({"java_code": java_code}, thread):
+    for event in graph.stream(state, thread):
         if "convert" in event:
-            state = event["convert"]
-            break  # Stop after conversion
+            state.update(event["convert"])
+            break
 
     while True:
         # Step 2: Render IR
@@ -185,18 +200,13 @@ def run_agent(java_code: str, output_dir: str):
         # Step 5: Process input
         for event in graph.stream(state, thread):
             if "process" in event:
-                state = event["process"]
-                break  # Process once per command
+                state.update(event["process"])
             elif "generate" in event:
-                state = event["generate"]
-                break
+                state.update(event["generate"])
+                break  # Break only after generate runs
 
         # Step 5a or 5b: Check next action
-        if state["user_command"] == "generate":
-            break  # Step 6 handled by generate node
-        elif state.get("exit", False):
-            print("Exiting...")
-            break
-        # Otherwise, loop back to Step 2
+        if state["user_command"] == "generate" or state.get("exit", False):
+            break  # Exit after generate or exit
 
     print("Gary completed.")

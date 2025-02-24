@@ -5,26 +5,26 @@ from .agent import run_agent
 def main():
     """CLI entry point for gary."""
     if len(sys.argv) != 3:
-        print("Usage: python -m gary <input_path_or_string> <output_dir>")
-        print("Example: python -m gary d:/src/legacy/example.java d:/src/output")
-        print("         python -m gary \"JButton b = new JButton();\" d:/src/output")
+        print("Usage: python -m gary <input-file-path> <output-file-path>")
+        print("Example: python -m gary examples/form.java output/test.py")
         return 1
 
-    input_arg = sys.argv[1]
-    output_dir = sys.argv[2]
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
 
-    if os.path.isfile(input_arg):
-        with open(input_arg, 'r', encoding='utf-8') as f:
+    # Validate input file
+    if not os.path.isfile(input_file):
+        print(f"Error: Input file '{input_file}' does not exist or is not a file.")
+        return 1
+    try:
+        with open(input_file, 'r', encoding='utf-8') as f:
             java_code = f.read()
-    else:
-        java_code = input_arg
-
-    if not os.path.isdir(output_dir):
-        print(f"Error: Output directory '{output_dir}' does not exist.")
+    except Exception as e:
+        print(f"Error: Failed to read input file '{input_file}': {str(e)}")
         return 1
 
     try:
-        run_agent(java_code, output_dir)
+        run_agent(java_code, output_file)
         return 0
     except Exception as e:
         print(f"Error: {e}")

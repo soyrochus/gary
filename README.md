@@ -1,8 +1,8 @@
-# Gary - A Test Platform for LangGraph Agents
+# Gary - A Test  for LangGraph Agents
 
-Gary is a lightweight, interactive test platform built with LangGraph to explore agent-based workflows. It converts Java Swing forms into a YAML intermediate representation (IR) using an LLM (OpenAI), allows users to modify the IR through a command-line interface, and generates Python code using the NiceGUI library. Named playfully after SpongeBob's pet snail (and an internal image reference), Gary demonstrates LangGraph's interrupt-driven capabilities in a practical, extensible way.
+Gary is a little sandbox for tinkering with LangGraph agents. It takes a Java Swing form, turns it into a YAML intermediate representation (IR) using OpenAI’s GPT-4o, lets you tweak it via a command-line chat, and spits out a Python NiceGUI script. Named after SpongeBob’s snail (as a wink to an internal joke, but also in hommage to the ever resilient pet), it’s hoping to grow into something more than just a quirky experiment.
 
-![Gary](img/gary_medium.png)
+![Gary](img/gary_small.png)
 
 ## Features  
 - Convert Java Swing code to YAML IR via OpenAI’s GPT-4o.  
@@ -24,18 +24,8 @@ Gary is a lightweight, interactive test platform built with LangGraph to explore
    cd gary
 ```
 
-Alternatively, create a new directory and copy the files there:
+**Set Up the Environment with** `uv`: Install `uv` if you haven’t already; [see the home page](https://docs.astral.sh/uv/getting-started/installation/).
 
-```bash
-mkdir gary  
-cd gary
-```
-
-**Set Up the Environment with** `uv`: Install `uv` if you haven’t already:  
-
-```bash
-pip install uv  
-```
 
 Then sync dependencies from `pyproject.toml`:  
 
@@ -57,18 +47,17 @@ Gary can be run as a command-line application to process Java Swing code (from a
 
 
 
-uv run python -m gary <input_path_or_string> <output_dir>
+uv run python -m gary <input_file_path> <outputput_file_path>
 
 **Examples**
 
-1. **Using a Java File**:  
-2. `bash`  
-3. uv run python -m gary "d:/src/legacy/example.java" "d:/src/output"  
+
+```bash
+uv run python -m gary "d:/src/legacy/example.java" "d:/src/output/test.py"  
+```
+   
    * Input: A Java Swing file (e.g., `example.java`).  
-   * Output: A `form.py` file in `d:/src/output/`.  
-4. **Using a Java String**:  
-5. `bash`  
-6. uv run python -m gary "import javax.swing.*; class Test { public static void main(String[] args) { JFrame f = new JFrame(); JButton b = new JButton("Click"); f.add(b); f.setVisible(true); }}" "d:/src/output"
+   * Output: A `form.py` file in `d:/src/output/`.   
 
 **Interactive Commands**
 
