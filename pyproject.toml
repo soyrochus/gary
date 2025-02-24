@@ -1,0 +1,15 @@
+[project]
+name = "gary"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=0.3.19",
+    "langchain-openai>=0.3.6",
+    "langgraph>=0.2.74",
+    "nicegui>=2.11.1",
+    "python-dotenv>=1.0.1",
+    "pyyaml>=6.0.2",
+    "tenacity>=9.0.0",
+]
