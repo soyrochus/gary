@@ -3,7 +3,7 @@ import os
 from typing import Dict, Any
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import InMemorySaver  # Updated import
+from langgraph.checkpoint.memory import InMemorySaver
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -19,8 +19,7 @@ class AgentState(Dict[str, Any]):
     yaml_ir: str = ""
     user_command: str = ""
     error: str = ""
-    output_dir: str = ""
-    waiting_for_input: bool = False
+    output_dir: str = ""  # Renamed to output_file in CLI, kept for consistency here
 
 # Initialize LLM with API key from .env
 api_key = os.getenv("OPENAI_API_KEY")
@@ -28,9 +27,9 @@ if not api_key:
     raise ValueError("OPENAI_API_KEY not found in .env file")
 llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=api_key)
 
-# Prompts
+# Prompt templates
 parse_prompt = PromptTemplate.from_template("""
-Convert this Java Swing code into a YAML IR with a 'form' key and 'elements' list. Each element needs 'type', 'id', and properties (e.g., 'label' for buttons, 'text' for labels). Return only the YAML string.
+Convert this Java Swing code into a YAML intermediate representation (IR) that captures the form's structure. The IR should have a 'form' key with a 'layout' specifying the top-level layout manager (e.g., BorderLayout, GridBagLayout) and a 'components' list. Each component must include 'type' (e.g., JButton, JLabel, JPanel), a unique 'id' (derive from variable names or assign sequentially like btn1, lbl1), and 'properties' (e.g., 'text' for labels, 'label' for buttons). For containers like JPanel, include a 'layout' key and a 'children' list for nested components. Add 'constraints' for layout-specific details (e.g., region for BorderLayout, gridx/gridy for GridBagLayout). Support common components: JButton, JLabel, JTextField, JCheckBox, JRadioButton, JComboBox, JList, JTable, JTextArea, JPanel, and layouts: FlowLayout, BorderLayout, GridLayout, GridBagLayout, BoxLayout. Return the raw YAML string without Markdown formatting, code block markers (like ```), or additional text.
 
 Java code:
 
@@ -39,7 +38,7 @@ Java code:
 """)
 
 generate_prompt = PromptTemplate.from_template("""
-Convert this YAML IR into a Python script using NiceGUI. Define a `create_form()` function and call `ui.run()`. Return only the Python code string.
+Convert this YAML intermediate representation (IR) into a Python script using NiceGUI. The IR has a 'form' key with a 'layout' (e.g., BorderLayout, GridBagLayout) and 'components' list. Each component has 'type' (e.g., JButton, JLabel, JPanel), 'id', 'properties', and optional 'layout', 'constraints', and 'children' for nesting. Define a `create_form()` function and call `ui.run()`. Map components to NiceGUI equivalents: JButton to ui.button, JLabel to ui.label, JTextField to ui.input, JCheckBox to ui.checkbox, JRadioButton to ui.radio, JComboBox to ui.select, JList to ui.select (multiple=True if needed), JTable to ui.table, JTextArea to ui.textarea, JPanel to ui.element('div') or ui.row()/ui.column(). Use layout hints: BorderLayout as ui.column() with ordered regions, GridBagLayout as ui.grid with gridx/gridy positioning, FlowLayout as ui.row(), BoxLayout as ui.row()/ui.column() per axis, GridLayout as ui.grid. Nest children within container blocks. Return the raw Python code string without Markdown formatting, code block markers (like ```), or additional text.
 
 YAML IR:
 
@@ -64,9 +63,14 @@ def convert_to_ir(state: AgentState) -> AgentState:
         state["error"] = ""
     except (OutputParserException, yaml.YAMLError, Exception) as e:
         state["error"] = f"Failed to parse Java code: {str(e)}"
-    return state  # Return full state
+    return state
 
 def user_interaction(state: AgentState) -> AgentState:
+    if state["error"]:
+        print("Error:", state["error"])
+    else:
+        print("\nCurrent IR:\n", state["yaml_ir"])
+    print("Options: 'visualize', 'add <path> <type> <id> <value>', 'change <path> <key> <value>', 'delete <path>', 'generate', 'exit'")
     return state
 
 def process_command(state: AgentState) -> AgentState:
@@ -74,66 +78,99 @@ def process_command(state: AgentState) -> AgentState:
         return state
     
     command = state["user_command"].strip().lower()
-    state["waiting_for_input"] = False
-    
     if command == "exit":
         state["exit"] = True
         return state
     if command == "retry" and state["error"]:
         state["error"] = ""
         return state
-
     if state["error"]:
         print("Cannot proceed due to error. Try 'retry' or 'exit'.")
         return state
 
     ir = yaml.safe_load(state["yaml_ir"])
-    elements = ir["form"]["elements"]
+    parts = command.split(maxsplit=1)
+    cmd_type = parts[0]
+    args = parts[1] if len(parts) > 1 else ""
 
     try:
-        if command == "visualize":
-            pass
-        elif command.startswith("add"):
-            _, type_, id_, value = command.split(maxsplit=3)
-            new_elem = {"type": type_, "id": id_}
-            new_elem["label" if type_ == "button" else "text"] = value
-            elements.append(new_elem)
-        elif command.startswith("change"):
-            _, id_, key, value = command.split(maxsplit=3)
-            for elem in elements:
-                if elem["id"] == id_:
-                    elem[key] = value
-                    break
+        if cmd_type == "visualize":
+            pass  # Already shown in user_interaction
+        elif cmd_type == "add":
+            path, type_, id_, value = args.split(maxsplit=3)
+            new_elem = {"type": type_, "id": id_, "properties": {"label" if type_ == "JButton" else "text": value}}
+            if path:
+                target = find_component(ir["form"]["components"], path.split(".")[0])
+                if target and target["type"] == "JPanel":
+                    target.setdefault("children", []).append(new_elem)
+                else:
+                    raise ValueError(f"Parent '{path}' not found or not a JPanel")
             else:
-                print(f"No element with id '{id_}' found.")
-        elif command.startswith("delete"):
-            _, id_ = command.split(maxsplit=1)
-            ir["form"]["elements"] = [e for e in elements if e["id"] != id_]
-        elif command == "generate":
+                ir["form"]["components"].append(new_elem)
+        elif cmd_type == "change":
+            path, key, value = args.split(maxsplit=2)
+            target = find_component(ir["form"]["components"], path)
+            if target:
+                if key.startswith("constraints."):
+                    target.setdefault("constraints", {})[key.split(".", 1)[1]] = value
+                else:
+                    target.setdefault("properties", {})[key] = value
+            else:
+                raise ValueError(f"Component '{path}' not found")
+        elif cmd_type == "delete":
+            path = args
+            parent, target = find_parent_and_component(ir["form"]["components"], path)
+            if target:
+                if parent:
+                    parent["children"] = [c for c in parent["children"] if c["id"] != path.split(".")[-1]]
+                else:
+                    ir["form"]["components"] = [c for c in ir["form"]["components"] if c["id"] != path]
+            else:
+                raise ValueError(f"Component '{path}' not found")
+        elif cmd_type == "generate":
             state["yaml_ir"] = yaml.dump(ir)
             return state
         else:
             print("Unknown command.")
         state["yaml_ir"] = yaml.dump(ir)
     except ValueError as e:
-        print(f"Invalid command format: {e}")
+        print(f"Invalid command: {e}")
     
-    return state  # Return full state
+    return state
+
+def find_component(components, path):
+    parts = path.split(".", 1)
+    for comp in components:
+        if comp["id"] == parts[0]:
+            if len(parts) == 1:
+                return comp
+            if "children" in comp:
+                return find_component(comp["children"], parts[1])
+    return None
+
+def find_parent_and_component(components, path):
+    parts = path.split(".", 1)
+    for i, comp in enumerate(components):
+        if comp["id"] == parts[0]:
+            if len(parts) == 1:
+                return None, comp
+            if "children" in comp:
+                sub_parent, sub_comp = find_parent_and_component(comp["children"], parts[1])
+                if sub_comp:
+                    return comp, sub_comp
+                return None, None
+    return None, None
 
 def generate_nicegui(state: AgentState) -> AgentState:
     try:
         python_code = call_llm(generate_prompt, {"yaml_ir": state["yaml_ir"]})
-        # Strip Markdown code block markers
         python_code = python_code.strip()
         if python_code.startswith("```"):
-            python_code = python_code.split("\n", 1)[1].rsplit("\n", 1)[0]  # Remove ```python and ```
-        
+            python_code = python_code.split("\n", 1)[1].rsplit("\n", 1)[0]
         if "ui.run()" not in python_code:
             raise ValueError("Generated code missing ui.run()")
         
         output_path = state["output_dir"]
-        print(f"DEBUG: Attempting to write to '{output_path}'")
-
         if os.path.exists(output_path):
             overwrite = input(f"File '{output_path}' already exists. Overwrite? (y/n): ").strip().lower()
             if overwrite != "y":
@@ -147,8 +184,6 @@ def generate_nicegui(state: AgentState) -> AgentState:
         print("Code:\n", python_code)
     except Exception as e:
         state["error"] = f"Failed to generate NiceGUI code: {str(e)}"
-        print(state["error"])
-        print(f"DEBUG: Exception type: {type(e).__name__}, message: {str(e)}")
     return state
 
 def build_graph():
@@ -159,17 +194,17 @@ def build_graph():
     workflow.add_node("generate", generate_nicegui)
     workflow.set_entry_point("convert")
     workflow.add_edge("convert", "interact")
-    workflow.add_edge("interact", "process")  # Always process after interact
+    workflow.add_edge("interact", "process")
     workflow.add_conditional_edges(
         "process",
         lambda state: (
             "generate" if state["user_command"] == "generate"
             else END if state.get("exit", False)
-            else "interact"  # Loop back for other commands
+            else "interact"
         ),
     )
     workflow.add_edge("generate", END)
-    return workflow.compile(checkpointer=InMemorySaver())
+    return workflow.compile(checkpointer=InMemorySaver(), interrupt_after=["interact"])
 
 def run_agent(java_code: str, output_file: str):
     """Run the Gary agent with input Java code and output file."""
@@ -177,36 +212,26 @@ def run_agent(java_code: str, output_file: str):
     thread = {"configurable": {"thread_id": "gary_thread"}}
     graph = build_graph()
 
-    # Step 0 & 1: Parse Java and convert to IR
-    for event in graph.stream(state, thread):
-        if "convert" in event:
-            state.update(event["convert"])
-            break
-
     while True:
-        # Step 2: Render IR
-        if state["error"]:
-            print("Error:", state["error"])
-            break
-        print("\nCurrent IR:\n", state["yaml_ir"])
-
-        # Step 3: Present menu
-        print("Options: 'visualize', 'add <type> <id> <value>', 'change <id> <key> <value>', 'delete <id>', 'generate', 'exit'")
-
-        # Step 4: Wait for input
-        user_input = input("Your command: ")
-        state["user_command"] = user_input
-
-        # Step 5: Process input
-        for event in graph.stream(state, thread):
-            if "process" in event:
-                state.update(event["process"])
+        events = graph.stream(state, thread)
+        for event in events:
+            if "interact" in event:
+                state.update(event["interact"])
+                user_input = input("Your command: ")
+                state["user_command"] = user_input
+                break
             elif "generate" in event:
                 state.update(event["generate"])
-                break  # Break only after generate runs
+                return  # Exit after generating
+            elif "process" in event:
+                state.update(event["process"])
 
-        # Step 5a or 5b: Check next action
-        if state["user_command"] == "generate" or state.get("exit", False):
-            break  # Exit after generate or exit
+        if state.get("exit", False):
+            print("Exiting...")
+            break
+
+        # Resume after interrupt
+        events = graph.stream(state, thread)
 
     print("Gary completed.")
+    
