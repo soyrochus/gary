@@ -17,17 +17,25 @@ wheels = [
 
 [[package]]
 name = "gary"
-version = "0.2.0"
+version = "0.3.0"
 source = { virtual = "." }
 dependencies = [
     { name = "jsonschema" },
     { name = "networkx" },
+    { name = "jsonpatch" },
+    { name = "openai" },
+    { name = "langchain" },
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "jsonschema" },
     { name = "networkx" },
+    { name = "jsonpatch" },
+    { name = "openai" },
+    { name = "langchain" },
+    { name = "python-dotenv" },
 ]
 
 [[package]]

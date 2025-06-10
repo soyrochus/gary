@@ -13,6 +13,10 @@ from .metagraph import (
     load_graph,
     parse_md,
     parse_sql,
+    patch_io,
+    importer_core,
+    validation,
+    # --- v0.3 ADDITION ---
 )
 from .regen import regen
 
@@ -61,6 +65,24 @@ def regen_cmd(args: argparse.Namespace) -> None:
     regen(Path(args.graphson), Path(args.target))
 
 
+# --- v0.3 ADDITION ---
+def import_cmd(args: argparse.Namespace) -> None:
+    import asyncio
+    patch = asyncio.run(importer_core.import_files([Path(f) for f in args.files]))
+    if args.output:
+        patch_io.dump_patch(patch, Path(args.output))
+    else:
+        print(json.dumps(patch, indent=2))
+
+# --- v0.3 ADDITION ---
+def apply_cmd(args: argparse.Namespace) -> None:
+    graph = load_graph(Path("metagraph.graphson"))
+    patch = patch_io.load_patch(Path(args.patch))
+    patch_io.apply_patch(graph, patch)
+    validation.validate_graph(graph)
+    dump_graph(graph, Path("metagraph.graphson"))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gary", description="Gary CLI")
     parser.add_argument("--version", action="version", version=__version__)
@@ -84,6 +106,15 @@ def main(argv: list[str] | None = None) -> int:
     p_regen.add_argument("graphson")
     p_regen.add_argument("target")
     p_regen.set_defaults(func=regen_cmd)
+
+    p_import = sub.add_parser("import", help="import artefact")
+    p_import.add_argument("files", nargs="+")
+    p_import.add_argument("-o", "--output")
+    p_import.set_defaults(func=import_cmd)
+
+    p_apply = sub.add_parser("apply", help="apply patch")
+    p_apply.add_argument("patch")
+    p_apply.set_defaults(func=apply_cmd)
 
     args = parser.parse_args(argv)
     args.func(args)

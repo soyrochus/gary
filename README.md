@@ -35,6 +35,7 @@ The end-goal is identical—AI-assisted code generation—but the path now runs 
 
    ```bash
    echo "OPENAI_API_KEY=sk-..." > .env        # keep in .gitignore
+   echo "OPENAI_MODEL=gpt-4o-mini" >> .env
    ```
 
 > **Prereqs**: Python 3.12+, `uv` 0.1.36+, `pip install networkx jsonschema` if you prefer pip.
@@ -63,6 +64,17 @@ uv run python -m gary build samples/sql/schema.sql > new.graphson
 uv run python -m gary diff metagraph.graphson new.graphson
 # → prints JSON-Patch with added node + edge
 ```
+
+## Importing artefacts
+
+```bash
+uv run python -m gary import samples/xml/widget.xml -o patch.json
+uv run python -m gary apply patch.json
+```
+
+The `import` command chooses between deterministic parsers and an LLM-based path.
+The `apply` command merges the resulting patch into `metagraph.graphson` after validation.
+
 
 ## Command overview
 
