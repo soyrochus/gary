@@ -1,10 +1,14 @@
 [project]
 name = "gary"
-version = "0.2.0"
+version = "0.3.0"
 description = "A Test Bed for MetaGraph-Powered LangGraph Agents "
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "networkx",
     "jsonschema",
+    "jsonpatch",
+    "openai",
+    "langchain",
+    "python-dotenv",
 ]

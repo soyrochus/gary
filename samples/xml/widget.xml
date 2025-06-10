@@ -1,0 +1,5 @@
+<!-- sample widget XML for LLM importer -->
+<widget>
+  <name>Example</name>
+  <field name="foo"/>
+</widget>
