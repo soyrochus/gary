@@ -1,135 +1,103 @@
-# Gary - A Test  for LangGraph Agents
+# Gary ­– A Test Bed for MetaGraph-Powered LangGraph Agents  
+*(Same hardy snail, brand-new brain.)*
 
-Gary is a little sandbox for tinkering with LangGraph agents. It takes a Java Swing form, turns it into a YAML intermediate representation (IR) using OpenAI’s GPT-4o, lets you tweak it via a command-line chat, and spits out a Python NiceGUI script. Named after SpongeBob’s snail (as a wink to an internal joke, but also in hommage to the ever resilient pet), it’s hoping to grow into something more than just a quirky experiment.
+Gary started life as a quirky Swing-to-NiceGUI converter.  
+He’s now pivoting into a **sandbox for experimenting with a graph-based Intermediate Representation (IR) called _MetaGraph_**.  
+The end-goal is identical—AI-assisted code generation—but the path now runs through a property-graph hub that merges every artefact we can throw at it.
 
 ![Gary](img/gary_small.png)
 
-## Features  
-- Convert Java Swing code to YAML IR via OpenAI’s GPT-4o.  
-- Interactive CLI for visualizing and modifying the IR (add, change, delete elements).  
-- Generate NiceGUI Python scripts from the IR.  
-- Resilient design with retries and error handling.
+## What Gary does (v0.2.0)
 
-## Prerequisites  
-- Python 3.10 or higher  
-- An OpenAI API key (stored in a `.env` file)  
-- `uv` (a modern Python package manager)
+| Stage | Purpose | Current status |
+|-------|---------|----------------|
+| **Multi-parse** | Ingest heterogeneous artefacts and emit MetaGraph nodes/edges. <br>• _DDL → Table/Column nodes_ <br>• _Markdown stories → Story nodes_ | ✅ Regex POC parsers included |
+| **Graph store** | Persist MetaGraph as newline-delimited **GraphSON v2** (`metagraph.graphson`). | ✅ networkx + JSON streaming |
+| **Diff & patch** | CLI sub-command produces an **RFC-6902 JSON-Patch** between two graph versions. | ✅ Minimal GumTree-style diff |
+| **Regenerate** | Stub generators walk the cleaned graph to (eventually) spit out code/tests/UI. | ⚠️ Hook provided; real templates TBD |
+| **LLM play-pen** | Future: LangGraph agents propose semantic patches instead of raw code. | 🛣️ Road-map item |
 
 ## Installation
 
-****Clone the Repository**** (if applicable, or create the project locally):  
-
-```bash 
-   git clone https://github.com/yourusername/gary.git  
+1. **Clone & enter**  
+   ```bash
+   git clone https://github.com/yourusername/gary.git
    cd gary
-```
+   ```
 
-**Set Up the Environment with** `uv`: Install `uv` if you haven’t already; [see the home page](https://docs.astral.sh/uv/getting-started/installation/).
+2. **Set up with `uv`** *(fast Poetry-like manager)*
 
+   ```bash
+   uv sync
+   ```
 
-Then sync dependencies from `pyproject.toml`:  
+3. **API keys (optional, for later agent work)**
 
-```bash
- uv sync  
-```
+   ```bash
+   echo "OPENAI_API_KEY=sk-..." > .env        # keep in .gitignore
+   ```
 
-**Configure the OpenAI API Key**: Create a `.env` file in the `gary/` directory:  
-```bash
-echo "OPENAI_API_KEY=your-openai-key-here" > .env  
-Replace `your-openai-key-here` with your actual OpenAI API key. Add `.env` to `.gitignore` to keep it private.
-```
+> **Prereqs**: Python 3.12+, `uv` 0.1.36+, `pip install networkx jsonschema` if you prefer pip.
 
-**Usage**
+## Quick-start
 
-Gary can be run as a command-line application to process Java Swing code (from a file or string) and output NiceGUI Python code.
-
-**Command Syntax**
-
-
-
-uv run python -m gary <input_file_path> <outputput_file_path>
-
-**Examples**
-
+### Build a MetaGraph from sample artefacts
 
 ```bash
-uv run python -m gary "d:/src/legacy/example.java" "d:/src/output/test.py"  
+uv run python -m gary build samples/sql/schema.sql samples/stories/login.md
 ```
-   
-   * Input: A Java Swing file (e.g., `example.java`).  
-   * Output: A `form.py` file in `d:/src/output/`.   
 
-**Interactive Commands**
+Creates `metagraph.graphson` in the project root.
 
-After running, Gary prompts for input:
-
-* `visualize`: Display the current YAML IR.  
-* `add <type> <id> <value>`: Add an element (e.g., `add button btn2 Submit`).  
-* `change <id> <key> <value>`: Modify an element (e.g., `change btn1 label Go`).  
-* `delete <id>`: Remove an element (e.g., `delete btn1`).  
-* `generate`: Create the NiceGUI Python file.  
-* `exit`: Quit the program.
-
-**Running the Generated Code**
-
-After generating `form.py`, run it:
+### Visualise the graph (one-liner)
 
 ```bash
-uv run python d:/src/output/form.py
+uv run python -m gary show metagraph.graphson
 ```
 
-**Example Java Swing File**
+### Make a change → diff it
 
-You can find it in the examples/form.java file:
-
-```java
-import javax.swing.*;
-
-public class Example {
-    public static void main(String[] args) {
-        // Create the frame
-        JFrame frame = new JFrame("Test Form");
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(300, 200);
-
-        // Add a button
-        JButton button = new JButton("Submit");
-        button.setBounds(100, 50, 100, 30);
-        frame.add(button);
-
-        // Add a label
-        JLabel label = new JLabel("Welcome!");
-        label.setBounds(100, 100, 100, 30);
-        frame.add(label);
-
-        // Set layout and make visible
-        frame.setLayout(null);
-        frame.setVisible(true);
-    }
-}
-
+```bash
+# pretend we edited schema.sql to add a column
+uv run python -m gary build samples/sql/schema.sql > new.graphson
+uv run python -m gary diff metagraph.graphson new.graphson
+# → prints JSON-Patch with added node + edge
 ```
 
-**Dependencies**
+## Command overview
 
-Managed via `uv` and listed in `pyproject.toml`:
+| Command                         | What it does                                           |
+| ------------------------------- | ------------------------------------------------------ |
+| `build <files…>`                | Parse inputs, merge into MetaGraph, write `.graphson`. |
+| `show  <graphson>`              | Pretty-print nodes & edges grouped by `kind`.          |
+| `diff  <old> <new>`             | Output JSON-Patch for node/edge additions & removals.  |
+| `regen <graphson> <target-dir>` | *(Stub)* Walk graph and scaffold code/tests.           |
 
-* `langgraph`: Workflow management  
-* `langchain` & `langchain_openai`: LLM integration  
-* `pyyaml`: YAML handling  
-* `nicegui`: UI generation  
-* `tenacity`: Retry logic  
-* `python-dotenv`: Environment variable loading
+All commands accept `-v` for chatty logs and `--help` for options.
 
-**License**
+## Tech stack
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+* **networkx** – in-memory property graph
+* **jsonschema** – node shape validation
+* **uv** – dev-env + script runner
+* **uuid / hashlib** – deterministic IDs & checksums
+* *(Coming soon)* **LangGraph + GPT-4o** – agentic patch proposals
 
-**Contributing**
+## Samples
 
-Feel free to open issues or submit pull requests to improve Gary. Contributions are welcome!
+`./samples/sql/schema.sql` and `./samples/stories/login.md` are tiny but real.
+Add more artefacts and rerun `build`—Gary merges them by stable UUID so diffs stay sane.
 
-**Author**
+## Contributing
 
-Created by Iwan van der Kleijn, 2025.
+Gary welcomes snail-pace or lightning-fast pull requests alike.
+Open an issue, fork, fix, and let the slime trails converge.
 
+## License
+
+MIT – do what you want, just feed the snail.
+
+---
+
+Created by **Iwan van der Kleijn**, 2025.
+*SpongeBob’s Gary was resilient; may this Gary be refactor-proof.*
