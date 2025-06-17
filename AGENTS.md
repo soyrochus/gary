@@ -6,11 +6,19 @@ Upgrade the existing **Gary** project so that artefact ingestion supports **two 
 
 1. **Deterministic parsers** (already present)  
    * SQL DDL  → `Table` / `Column` nodes  
-   * Markdown User Stories → `Story` nodes  
+   * Markdown User Stories → `Story` nodes 
+   * Generic Markdown documents (i.e. "documenation)
+
+   Create types in the json graph schema which supports these types
+   Document these types in the doc directory (format for documentation: GIthub documentation. Be sufficiently verbose to document the schemas well) 
+
+   Use the document.md in samples/markdown for the markdown test case.
 
 2. **LLM-based importer** for any artefact that lacks a cheap parser.  
    * Uses OpenAI function-calling (JSON mode) to return validated MetaGraph nodes.  
    * Falls back to deterministic path if artefact extension is recognised AND file ≤ 16 KB.
+   * Add a type specifier to the genetic type so the user/llm can determine what the original type has been
+   * Create an adecuate test. Use the samples, widget.xml as a test case
 
 ## High-level architecture
 ```
@@ -19,11 +27,16 @@ gary/
 ├─ cli.py               # extend with `import`, `apply`
 ├─ metagraph/
 │   ├─ ...
-│   ├─ importer\_llm.py  # **new** – universal LLM importer
-│   ├─ importer\_core.py # **new** – orchestrates parser selection
-│   ├─ patch\_io.py      # **new** – read/write RFC-6902 patches
+│   ├─ ai\..            # all AI/Langchain related funcionality here
+│   ├─ importer\llm.py  # **new** – universal LLM importer
+│   ├─ importer\core.py # **new** – orchestrates parser selection
+│   ├─ patch\io.py      # **new** – read/write RFC-6902 patches
 │   └─ validation.py    # edge-type + JSON-Schema helpers
 ├─ regen.py
+
+Add the proper __init__.py module specifiers.
+
+Add the markdown deterministic parser compatible with the above document structure.
 
 ```
 
@@ -31,7 +44,7 @@ gary/
 1. **Language**: Python 3.12; only stdlib + `networkx`, `jsonschema`, `jsonpatch`, `openai`.
 2. **MetaGraph node schema** unchanged.
 3. **LLM call contract**  
-   * Model: env var `OPENAI_MODEL` (default `gpt-4o-mini`).  
+   * Model: env var `OPENAI_MODEL` (default `gpt-4.1`).  
    * System prompt:  
      ```
      You are MetaGraph-ImporterGPT. Return ONLY JSON conforming to:
